@@ -8,23 +8,43 @@ app.get("/curate", async (req, res) => {
   const { frequency = "weekly", category = "adventure" } = req.query;
 
   try {
-    // 1️⃣ Pull experiences from your mock API (replace this URL with your actual one)
-    const mockApi = await axios.get("https://YOUR_PROJECT_ID.mockapi.io/experiences");
+    // 1️⃣ Pull events from Ticketmaster
+    const ticketmasterData = await axios.get(
+      "https://app.ticketmaster.com/discovery/v2/events.json",
+      {
+        params: {
+          apikey: process.env.TICKETMASTER_API_KEY,
+          countryCode: "US",
+          size: 10,
+        },
+      }
+    );
 
-    // 2️⃣ Ask OpenAI to curate experiences
+    const events = ticketmasterData.data._embedded?.events || [];
+
+    if (events.length === 0) {
+      return res.status(404).json({ error: "No events found from Ticketmaster" });
+    }
+
+    // 2️⃣ Ask OpenAI to curate structured experiences
     const openaiResp = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: "You are a travel curator recommending unique experiences." },
+          {
+            role: "system",
+            content:
+              "You are a helpful travel curator. Based on the event data provided, create a short curated list of unique experiences in structured JSON. Each item should include: title, location, date, and a short description.",
+          },
           {
             role: "user",
-            content: `Curate ${frequency} ${category} experiences using:\n${JSON.stringify(
-              mockApi.data
+            content: `Curate ${frequency} ${category} experiences using this Ticketmaster event data:\n${JSON.stringify(
+              events.slice(0, 5)
             )}`,
           },
         ],
+        response_format: { type: "json_object" },
       },
       {
         headers: {
@@ -34,8 +54,8 @@ app.get("/curate", async (req, res) => {
       }
     );
 
-    // ✅ Return the curated response
-    res.json({ curated: openaiResp.data.choices[0].message.content });
+    // 3️⃣ Return structured curated results
+    res.json(JSON.parse(openaiResp.data.choices[0].message.content));
   } catch (error) {
     console.error("🔥 Error details:", error.response?.data || error.message);
     res
